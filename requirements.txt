@@ -1,0 +1,28 @@
+# requirements.txt
+# Python package dependencies for FileOver microservice.
+# Copyright: (c) 2026, Alex Rembez (@arembez) <arembez@gmail.com>
+# MIT License (see LICENSE or https://opensource.org/licenses/MIT)
+
+# FastAPI framework for building APIs
+fastapi>=0.104.1
+
+# ASGI server with HTTP/2 and WebSocket support
+uvicorn[standard]>=0.32.1
+
+# SMB protocol client library
+smbprotocol>=1.10.0
+
+# Multipart form data parser (required for FastAPI file uploads)
+python-multipart>=0.0.9
+
+# Load environment variables from .env file
+python-dotenv>=1.0.0
+
+# Pydantic settings management
+pydantic-settings>=2.5.2
+
+# Asynchronous I/O library (used by FastAPI/Starlette)
+anyio>=4.5.0
+
+# JSON Web Token library (for session authentication)
+pyjwt>=2.8.0
