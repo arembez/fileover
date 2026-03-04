@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from app import __version__
+from app import __title__, __version__, __description__
 from app.http_routes import router
 from app.sessions_collection import sessions
 
@@ -64,8 +64,8 @@ async def lifespan(app: FastAPI):
 
 # Initialize FastAPI application with metadata
 app = FastAPI(
-    title="fileOver",
-    description="REST API Gateway for file operations",
+    title=__title__,
+    description=__description__,
     version=__version__,  
     lifespan=lifespan
 )
