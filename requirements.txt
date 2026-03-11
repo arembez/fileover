@@ -26,3 +26,9 @@ anyio>=4.5.0
 
 # JSON Web Token library (for session authentication)
 pyjwt>=2.8.0
+
+# System and process monitoring (for health checks)
+psutil>=5.9.0
+
+# OS platform information
+distro>=1.8.0
