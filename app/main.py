@@ -57,8 +57,8 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         logger.info("Shutting down clients...")
-        sessions.stop_maintenance()
-        sessions.clear()
+        await sessions.stop_maintenance()
+        await sessions.clear()
         logger.info("Clients disconnected")
 
 
