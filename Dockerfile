@@ -2,19 +2,34 @@
 # Copyright: (c) 2026, Alex Rembez (@arembez) <arembez@gmail.com>
 # MIT License (see LICENSE or https://opensource.org/licenses/MIT)
 
-FROM python:3.11-slim
+FROM python:3.14.3-slim-trixie AS builder
+
+# Set the working directory
+WORKDIR /build
+
+# Copy only requirements first (for better caching)
+COPY requirements.txt .
+
+# Install dependencies to a temporary location
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# Final stage
+FROM python:3.14.3-slim-trixie
 
 # Set the working directory to /fileover
 WORKDIR /fileover
 
-# Install system dependencies (if needed for building packages)
-RUN apt-get update && apt-get install -y gcc && rm -rf /var/lib/apt/lists/*
+# Install only runtime system dependencies (no build tools)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy and install main dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy Python dependencies from builder
+COPY --from=builder /root/.local /root/.local
 
-# Copy application code to /fileover/app
+# Make sure scripts in .local are usable
+ENV PATH=/root/.local/bin:$PATH
+
+# Copy application code
 COPY ./app /fileover/app
 
 # Copy healthcheck script and make it executable

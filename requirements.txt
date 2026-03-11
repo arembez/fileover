@@ -4,31 +4,46 @@
 # MIT License (see LICENSE or https://opensource.org/licenses/MIT)
 
 # FastAPI framework for building APIs
-fastapi>=0.104.1
+fastapi>=0.115.12
 
 # ASGI server with HTTP/2 and WebSocket support
-uvicorn[standard]>=0.32.1
+uvicorn[standard]>=0.34.0
 
 # SMB protocol client library
-smbprotocol>=1.10.0
+smbprotocol>=1.16.0
 
 # Multipart form data parser (required for FastAPI file uploads)
-python-multipart>=0.0.9
+python-multipart>=0.0.20
 
 # Load environment variables from .env file
-python-dotenv>=1.0.0
+python-dotenv>=1.1.0
 
 # Pydantic settings management
-pydantic-settings>=2.5.2
+pydantic-settings>=2.8.1
 
 # Asynchronous I/O library (used by FastAPI/Starlette)
-anyio>=4.5.0
+anyio>=4.9.0
 
 # JSON Web Token library (for session authentication)
-pyjwt>=2.8.0
+pyjwt>=2.10.1
 
-# System and process monitoring (for health checks)
-psutil>=5.9.0
+# System and process monitoring (optional but recommended for health checks)
+psutil>=7.0.0
 
 # OS platform information
-distro>=1.8.0
+distro>=1.9.0
+
+# Pydantic core (updated for Python 3.14 support)
+pydantic-core>=2.27.2
+
+# Cryptography (updated for Python 3.14 support)
+cryptography>=44.0.2
+
+# CFFI (updated for Python 3.14 support)
+cffi>=1.17.1
+
+# Watchfiles (updated for Python 3.14 support)
+watchfiles>=1.0.4
+
+# httptools (updated for Python 3.14 support)
+httptools>=0.6.4
