@@ -51,6 +51,6 @@ __all__ = [
 
 # Package metadata
 __title__ = "fileover"
-__version__ = '1.2.5'
+__version__ = '1.2.6'
 __description__ = "REST API Gateway for file operations"
 __author__ = 'Alex Rembez <arembez@gmail.com>'

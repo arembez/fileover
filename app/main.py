@@ -11,14 +11,20 @@ MIT License (see LICENSE or https://opensource.org/licenses/MIT)
 
 import os
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
 
 from app import __title__, __version__, __description__
 from app.http_routes import router
 from app.sessions_collection import sessions
-
+from app.exceptions import (
+    ControllerError, PathNotFoundError, NotADirectoryError, IsADirectoryError,
+    PermissionDeniedError, FileTypeNotAllowedError, FileSizeExceededError,
+    ConnectionError, OperationNotSupportedError
+)
 
 # Configure logging format
 logging_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -30,6 +36,72 @@ else:
     logging.basicConfig(level=logging.INFO, format=logging_format)
     
 logger = logging.getLogger(__name__)
+
+
+class ExceptionHandlerMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to catch all exceptions and return clean responses.
+    """
+    async def dispatch(self, request: Request, call_next):
+        try:
+            return await call_next(request)
+        except Exception as exc:
+            # Map controller exceptions to HTTP responses
+            if isinstance(exc, PathNotFoundError):
+                return JSONResponse(
+                    status_code=404,
+                    content={"success": False, "error": str(exc)}
+                )
+            elif isinstance(exc, NotADirectoryError):
+                return JSONResponse(
+                    status_code=400,
+                    content={"success": False, "error": str(exc)}
+                )
+            elif isinstance(exc, IsADirectoryError):
+                return JSONResponse(
+                    status_code=400,
+                    content={"success": False, "error": str(exc)}
+                )
+            elif isinstance(exc, (PermissionDeniedError, FileTypeNotAllowedError)):
+                return JSONResponse(
+                    status_code=403,
+                    content={"success": False, "error": str(exc)}
+                )
+            elif isinstance(exc, FileSizeExceededError):
+                return JSONResponse(
+                    status_code=413,
+                    content={"success": False, "error": str(exc)}
+                )
+            elif isinstance(exc, ConnectionError):
+                return JSONResponse(
+                    status_code=503,
+                    content={"success": False, "error": str(exc)}
+                )
+            elif isinstance(exc, OperationNotSupportedError):
+                return JSONResponse(
+                    status_code=501,
+                    content={"success": False, "error": str(exc)}
+                )
+            elif isinstance(exc, ValueError):
+                return JSONResponse(
+                    status_code=400,
+                    content={"success": False, "error": str(exc)}
+                )
+            elif isinstance(exc, ControllerError):
+                # Catch-all for other controller errors
+                logger.warning(f"Controller error: {exc}")
+                return JSONResponse(
+                    status_code=500,
+                    content={"success": False, "error": str(exc)}
+                )
+            
+            # For unexpected errors, log and return generic error
+            logger.error(f"Unexpected error: {exc}", exc_info=True)
+            return JSONResponse(
+                status_code=500,
+                content={"success": False, "error": "Internal server error"}
+            )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -79,6 +151,9 @@ app.add_middleware(
     allow_methods=["*"],            # Allow all HTTP methods
     allow_headers=["*"],            # Allow all headers
 )
+
+# Add exception handler middleware to catch all exceptions
+app.add_middleware(ExceptionHandlerMiddleware)
 
 
 # Include all API routes from http_routes module

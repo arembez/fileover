@@ -16,6 +16,11 @@ from io import BytesIO
 from typing import List, Dict, Optional, Any
 
 from app.base import EndpointController
+from app.exceptions import (
+    PathNotFoundError, NotADirectoryError, IsADirectoryError,
+    PermissionDeniedError, FileTypeNotAllowedError, FileSizeExceededError,
+    ConnectionError, OperationNotSupportedError
+)
 
 # Suppress verbose smbprotocol logging unless DEBUG is enabled
 if not (os.getenv("DEBUG", "false").lower() == "true"):
@@ -145,15 +150,29 @@ class SMBController(EndpointController):
     def list_directory(self, path: str = "") -> List[Dict[str, Any]]:
         """
         List contents of a directory.
-
+        
         Args:
             path: Directory path relative to root.
-
+        
         Returns:
             List of items with metadata.
+        
+        Raises:
+            PathNotFoundError: If path doesn't exist.
+            NotADirectoryError: If path is not a directory.
+            ConnectionError: If connection fails.
         """
         self._ensure_connected()
         full_path = self._build_full_path(path)
+        
+        # Check if path exists
+        if not smbclient.path.exists(full_path):
+            raise PathNotFoundError(f"Path does not exist: {path}")
+        
+        # Check if it's a directory
+        if not smbclient.path.isdir(full_path):
+            raise NotADirectoryError(f"Path is not a directory: {path}")
+        
         files = []
         try:
             entries = smbclient.scandir(full_path)
@@ -173,10 +192,10 @@ class SMBController(EndpointController):
                     print(f"Error processing entry {entry.name}: {e}")
                     continue
         except Exception as e:
-            print(f"Error listing directory {full_path}: {e}")
-            raise e
+            raise ConnectionError(f"Error listing directory {full_path}: {e}")
+        
         return files
-
+    
     def download(
         self, path: str, offset: int = 0, length: Optional[int] = None
     ) -> BytesIO:
