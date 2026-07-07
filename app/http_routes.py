@@ -37,10 +37,10 @@ async def init_session(request: SessionInitRequest):
     
     Args:
         request (SessionInitRequest): Session initialization parameters including
-                                     username, password, server, and controller type
-                                     
+                                    username, password, server, and controller type
+                                    
     Returns:
-        SessionResponse: Contains success status and JWT token
+        SessionResponse: Contains session ID, JWT token, expiry time, and identity info
         
     Raises:
         HTTPException 401: If authentication fails
@@ -49,10 +49,11 @@ async def init_session(request: SessionInitRequest):
     try:        
         session = await sessions.add(request)
         return SessionResponse(
-            success=True,
-            token=session.token
+            session_id=session.id,
+            token=session.token,
+            expires_at=session.expires_at,
+            identity=session.identity
         )
-    
     except HTTPException:
         raise
     except Exception as e:
@@ -60,6 +61,33 @@ async def init_session(request: SessionInitRequest):
             status_code=500,
             detail=f"Session initialization failed: {str(e)}"
         )
+        
+@router.post("/close")
+async def close(authorization: Optional[str] = Header(None)):
+    """
+    Close an existing session by invalidating the provided JWT token.
+    
+    Terminates the session associated with the bearer token included in the Authorization header.
+    After successful logout, the token will no longer be accepted for subsequent requests.
+    
+    Args:
+        authorization (Optional[str]): The Authorization header containing a Bearer token.
+                                    Automatically extracted from the request header.
+    
+    Returns:
+        dict: A success response with `success: True` and a confirmation message.
+    
+    Raises:
+        HTTPException 401: If the Authorization header is missing, invalid, 
+                        or the token is expired/invalid.
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    token = authorization.split(" ")[1]
+    closed = await sessions.close_session_by_token(token)
+    if not closed:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+    return {"success": True, "message": "Session closed"}
 
 # ----------------------------------------------------------------------
 # File operations (matching EndpointController methods)
