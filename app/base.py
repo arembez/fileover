@@ -9,8 +9,9 @@ MIT License (see LICENSE or https://opensource.org/licenses/MIT)
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Type
 from io import BytesIO
+from pydantic import BaseModel
 
 
 class EndpointController(ABC):
@@ -25,6 +26,24 @@ class EndpointController(ABC):
     methods for file system operations like listing, downloading, uploading,
     and managing files and directories.
     """
+    
+    @classmethod
+    def get_required_params(cls) -> List[str]:
+        """
+        Return a list of required parameter names.
+        Override this if you want simple presence validation without Pydantic.
+        """
+        return []
+    
+    @classmethod
+    def get_parameter_model(cls) -> Optional[Type[BaseModel]]:
+        """
+        Return a Pydantic model class for validating initialization parameters.
+        Override in subclasses to define specific validation requirements.
+        
+        If returns None, parameters are accepted without validation.
+        """
+        return None
     
     @abstractmethod
     def __init__(self, **kwargs):
