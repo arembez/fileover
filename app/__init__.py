@@ -15,7 +15,6 @@ from .types import (
     SessionStatus, 
     SessionResponse, 
     SessionPriorityTask,
-    Credentials,
     ErrorResponse
 )
 from .controllers_collection import controllers
@@ -33,7 +32,6 @@ __all__ = [
     'health',  
     
     # Types
-    'Credentials',
     'SessionInitRequest',
     'SessionStatus',
     'SessionResponse',
@@ -51,6 +49,6 @@ __all__ = [
 
 # Package metadata
 __title__ = "fileover"
-__version__ = '1.2.6'
+__version__ = '1.2.9'
 __description__ = "REST API Gateway for file operations"
 __author__ = 'Alex Rembez <arembez@gmail.com>'
