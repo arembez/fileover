@@ -13,7 +13,8 @@ import time
 import logging
 import smbclient
 from io import BytesIO
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Type
+from pydantic import BaseModel, Field
 
 from app.base import EndpointController
 from app.exceptions import (
@@ -31,6 +32,15 @@ if not (os.getenv("DEBUG", "false").lower() == "true"):
     logging.getLogger("smbprotocol.open").setLevel(logging.WARNING)
     logging.getLogger("smbprotocol.connection").setLevel(logging.WARNING)
 
+class SMBControllerParams(BaseModel):
+    server: str = Field(..., min_length=1)
+    share: str = Field(..., min_length=1)
+    identity: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=1)
+    port: int = Field(445, ge=1, le=65535)
+    root_path: str = Field("")
+    max_file_size: Optional[int] = Field(None, gt=0)
+    allowed_extensions: Optional[List[str]] = Field(None)
 
 class SMBController(EndpointController):
     """
@@ -42,13 +52,12 @@ class SMBController(EndpointController):
         self,
         server: str,
         share: str,
-        username: str,
+        identity: str,
         password: str,
         port: int = 445,
         root_path: str = "",
         max_file_size: Optional[int] = None,
-        allowed_extensions: Optional[List[str]] = None,
-        **kwargs
+        allowed_extensions: Optional[List[str]] = None
     ):
         """
         Initialize SMB controller with connection parameters.
@@ -56,17 +65,16 @@ class SMBController(EndpointController):
         Args:
             server: SMB server hostname or IP.
             share: Share name.
-            username: Authentication username.
+            identity: Authentication identity.
             password: Authentication password.
             port: SMB port (default 445).
             root_path: Optional base path within the share.
             max_file_size: Maximum allowed file size for downloads (bytes).
             allowed_extensions: List of allowed file extensions (lowercase, no dot).
-            **kwargs: Additional parameters (ignored).
         """
         self.server = server
         self.share = share
-        self.username = username
+        self.identity = identity
         self.password = password
         self.port = port
         self.root_path = root_path.strip("/")
@@ -76,6 +84,10 @@ class SMBController(EndpointController):
         self._connected = False
         self.last_used = time.time()
 
+    @classmethod
+    def get_parameter_model(cls) -> Optional[Type[BaseModel]]:
+        return SMBControllerParams
+    
     @property
     def connected(self) -> bool:
         """Return current connection state."""
@@ -84,10 +96,10 @@ class SMBController(EndpointController):
     def connect(self) -> bool:
         """Establish connection to the SMB server."""
         try:
-            smbclient.ClientConfig(username=self.username, password=self.password)
+            smbclient.ClientConfig(username=self.identity, password=self.password)
             smbclient.register_session(
                 server=self.server,
-                username=self.username,
+                username=self.identity,
                 password=self.password,
                 port=self.port,
                 connection_timeout=30,
@@ -97,7 +109,7 @@ class SMBController(EndpointController):
             self._connected = True
         except Exception as e:
             self._connected = False
-            print(f"Connection error for {self.username}@{self.server}: {e}")
+            print(f"Connection error for {self.identity}@{self.server}: {e}")
         return self._connected
 
     def disconnect(self):
