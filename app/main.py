@@ -36,7 +36,7 @@ else:
     logging.basicConfig(level=logging.INFO, format=logging_format)
     
 logger = logging.getLogger(__name__)
-
+logger.info(f"Log level: {logging.getLevelName(logger.getEffectiveLevel())}")
 
 class ExceptionHandlerMiddleware(BaseHTTPMiddleware):
     """
@@ -122,6 +122,8 @@ async def lifespan(app: FastAPI):
     try:
         logger.info(f"Starting up {app.title} v{app.version}")
         logger.info(f"{app.description}")
+        controller_names = sessions.get_available_controllers()
+        logger.info(f"Loaded {len(controller_names)} controller(s): {', '.join(controller_names)}")
         sessions.start_maintenance()
         yield
     except Exception as e:
@@ -168,7 +170,7 @@ async def root():
     # Collect all routes for documentation (excluding the root itself to avoid recursion)
     endpoints = []
     for route in app.routes:
-        if route.path != "/":
+        if hasattr(route, "path") and route.path != "/":
             endpoints.append({
                 "path": route.path,
                 "name": route.name,
