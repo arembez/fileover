@@ -13,6 +13,7 @@ import importlib.util
 import inspect
 from pathlib import Path
 from typing import Dict, Type, Optional
+from pydantic import ValidationError
 
 from app.base import EndpointController
 from app.types import SessionInitRequest
@@ -86,44 +87,69 @@ class ControllersCollection:
                         
         except Exception as e:
             print(f"Failed to load {file_path}: {e}")
+
+    def _validate_params(self, controller_class, params: dict) -> dict:
+        """
+        Validate parameters using controller's declared validators.
+        Returns validated params (after possible Pydantic transformation).
+        Raises ValueError with detailed message on failure.
+        """
+        model_cls = controller_class.get_parameter_model()
+        if model_cls is not None:
+            try:
+                model = model_cls(**params)
+                return model.model_dump()  # или .dict()
+            except ValidationError as e:
+                errors = []
+                for err in e.errors():
+                    field = ".".join(str(loc) for loc in err["loc"])
+                    errors.append(f"{field}: {err['msg']}")
+                raise ValueError(f"Validation error: {'; '.join(errors)}")
+
+        required = controller_class.get_required_params()
+        if required:
+            missing = [f for f in required if f not in params]
+            if missing:
+                raise ValueError(f"Missing required parameters: {', '.join(missing)}")
+
+        return params
     
+    def _init_controller(self, controller_class, params: dict) -> EndpointController:
+        """
+        Instantiate the controller class with validated parameters.
+        Handles TypeError and any other instantiation errors.
+        """
+        try:
+            return controller_class(**params)
+        except TypeError as e:
+            raise ValueError(f"Invalid parameters for controller {controller_class.__name__}: {e}")
+        except Exception as e:
+            raise ValueError(f"Failed to initialize controller {controller_class.__name__}: {e}")
+        
     def __getitem__(self, key) -> Optional[EndpointController]:
         """
         Get a controller instance by SessionInitRequest or controller name.
-        
-        If key is a SessionInitRequest:
-            - Instantiates the appropriate controller with the request parameters
-            - Returns a controller instance or None if creation fails
-            
-        If key is a string:
-            - Returns the controller class for the given name, or None if not found
-        
-        Args:
-            key (Union[SessionInitRequest, str]): Either a session request or controller name
-            
-        Returns:
-            Optional[EndpointController]: Controller instance or class, depending on key type
-            
-        Raises:
-            TypeError: If key is neither SessionInitRequest nor str
         """
         if isinstance(key, SessionInitRequest):
             controller_class = self.controllers.get(key.controller)
             if not controller_class:
-                return None
-            
-            # Get all parameters from the request
-            all_params = key.model_dump()
+                raise ValueError(
+                    f"Unknown controller: '{key.controller}'. "
+                    f"Available: {', '.join(self.controllers.keys())}"
+                )
+
+            params = key.model_dump()
             if key.model_extra:
-                all_params.update(key.model_extra)
-            
-            try:
-                return controller_class(**all_params)
-            except Exception as e:
-                print(f"Failed to create controller instance: {e}")
-                return None
+                params.update(key.model_extra)
+            params.pop('controller', None)
+
+            validated_params = self._validate_params(controller_class, params)
+
+            return self._init_controller(controller_class, validated_params)
+
         elif isinstance(key, str):
             return self.controllers.get(key)
+
         else:
             raise TypeError(f"Expected SessionInitRequest or str, got {type(key)}")
     
