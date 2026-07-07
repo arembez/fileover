@@ -8,12 +8,13 @@ and background maintenance tasks.
 Copyright: (c) 2026, Alex Rembez (@arembez) <arembez@gmail.com>
 MIT License (see LICENSE or https://opensource.org/licenses/MIT)
 """
-
+from __future__ import annotations
 import asyncio
 import time
 import heapq
 import uuid
 import jwt
+import logging
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from collections import deque
@@ -23,6 +24,7 @@ from app.base import EndpointController
 from app.types import SessionInitRequest, SessionStatus, SessionResponse, SessionPriorityTask
 from app.controllers_collection import controllers
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class Session:
@@ -31,7 +33,7 @@ class Session:
     
     Attributes:
         id (str): Unique session identifier
-        username (str): Username associated with the session
+        identity (Optional[str]): Backend identity associated with the session, if applicable.
         controller (EndpointController): Controller instance for file operations
         created_at (float): Unix timestamp when session was created
         expires_at (float): Unix timestamp when session expires
@@ -40,7 +42,7 @@ class Session:
         token (str): JWT token for session authentication
     """
     id: str
-    username: str
+    identity: str | None
     controller: EndpointController
     created_at: float
     expires_at: float 
@@ -75,9 +77,9 @@ class SessionsCollection:
     """
     
     def __init__(self, max_sessions: int = 20, 
-                idle_timeout: int = 300, 
+                idle_timeout: int = 900, 
                 task_timeout: int = 30,
-                jwt_secret: str = None,
+                jwt_secret: str | None = None,
                 jwt_algorithm: str = "HS256"):
         """
         Initialize the sessions collection.
@@ -95,7 +97,7 @@ class SessionsCollection:
         self.jwt_secret = jwt_secret or self._generate_jwt_secret()
         self.jwt_algorithm = jwt_algorithm
         
-        self._session_stack: Dict[str, 'Session'] = {}
+        self._session_stack: Dict[str, Session] = {}
         self.idle_sessions: deque = deque()
         self.task_queue: list = []
         self.lock = asyncio.Lock()
@@ -103,7 +105,16 @@ class SessionsCollection:
         self.total_tasks = 0
         self.completed_tasks = 0
         self.failed_tasks = 0
-        self._maintenance_task = None
+        self._maintenance_task: asyncio.Task | None = None
+
+    def get_available_controllers(self) -> list:
+        """
+        Return a list of names of all available endpoint controllers.
+
+        Returns:
+            list: A list of controller class names as strings.
+        """
+        return list(controllers.controllers.keys())
 
     def _generate_jwt_secret(self) -> str:
         """
@@ -115,28 +126,34 @@ class SessionsCollection:
         import secrets
         return secrets.token_urlsafe(32)
     
-    def _create_session_token(self, session_id: str, username: str, expires_at: float) -> str:
+    def _create_session_token(
+        self,
+        session_id: str,
+        identity: str | None,
+    ) -> str:
         """
         Create a JWT token for session authentication.
-        
+
         Args:
             session_id: Unique session identifier
-            username: Username associated with the session
+            identity: Backend identity associated with the session, if any
             expires_at: Token expiration timestamp
-            
+
         Returns:
             str: Encoded JWT token
         """
         payload = {
-            'session_id': session_id,
-            'username': username,
-            'exp': datetime.fromtimestamp(expires_at),
-            'iat': datetime.now(timezone.utc),
-            'type': 'session'
+            "session_id": session_id,
+            "iat": datetime.now(timezone.utc),
+            "type": "session",
         }
+
+        if identity is not None:
+            payload["identity"] = identity
+
         return jwt.encode(payload, self.jwt_secret, algorithm=self.jwt_algorithm)
     
-    def _verify_session_token(self, token: str) -> Optional[Dict]:
+    def _verify_session_token(self, token: str) -> Dict | None:
         """
         Verify and decode a session JWT token.
         
@@ -151,8 +168,6 @@ class SessionsCollection:
             if payload.get('type') != 'session':
                 return None
             return payload
-        except jwt.ExpiredSignatureError:
-            return None
         except jwt.InvalidTokenError:
             return None
     
@@ -169,19 +184,23 @@ class SessionsCollection:
         Raises:
             ConnectionError: If controller connection fails
         """
-        controller = controllers[request]        
+        controller = controllers[request]
+        if controller is None:
+            raise ValueError(f"Unknown controller: {request.controller}")
+            
         if not controller.connect():
-            raise ConnectionError("Failed to connect to SMB server")
+            raise ConnectionError(f"Failed to connect to {request.server} by {request.controller}")
         
         session_id = str(uuid.uuid4())
         created_at = time.time()
         expires_at = created_at + self.idle_timeout
-        
-        token = self._create_session_token(session_id, controller.username, expires_at)
+        identity = getattr(controller, 'identity', None)
+
+        token = self._create_session_token(session_id, identity)
         
         session = Session(
             id=session_id,
-            username=controller.username,
+            identity=identity,
             controller=controller,
             created_at=created_at,
             expires_at=expires_at,
@@ -196,7 +215,7 @@ class SessionsCollection:
         
         return session
     
-    async def validate_session(self, token: str) -> Optional[str]:
+    async def validate_session(self, token: str) -> str | None:
         """
         Validate a session token and return the session ID if valid.
         
@@ -216,50 +235,19 @@ class SessionsCollection:
         
         async with self.lock:
             session = self._session_stack.get(session_id)
-            if not session or session.status == SessionStatus.ERROR:
+            if not session or session.status in (SessionStatus.ERROR, SessionStatus.CLOSED):
                 return None
             
             if time.time() > session.expires_at:
                 return None
             
-            return session_id
-    
-    async def refresh_session(self, token: str) -> Optional[SessionResponse]:
-        """
-        Refresh an existing session, extending its expiration.
-        
-        Args:
-            token: Current session token
-            
-        Returns:
-            Optional[SessionResponse]: New session data if successful, None otherwise
-        """
-        session_id = await self.validate_session(token)
-        if not session_id:
-            return None
-        
-        async with self.lock:
-            session = self._session_stack.get(session_id)
-            if not session:
-                return None
-            
             new_expires_at = time.time() + self.idle_timeout
             session.expires_at = new_expires_at
             session.last_used = time.time()
-            
-            new_token = self._create_session_token(session_id, session.username, new_expires_at)
-            session.token = new_token
-            
-            return SessionResponse(
-                session_id=session_id,
-                token=new_token,
-                expires_at=new_expires_at,
-                username=session.username,
-                server=session.controller.server,
-                share=session.controller.share
-            )
+
+            return session_id
     
-    async def get_session_by_token(self, token: str) -> Optional[Session]:
+    async def get_session_by_token(self, token: str) -> Session | None:
         """
         Retrieve a session object by its token.
         
@@ -275,6 +263,31 @@ class SessionsCollection:
         
         async with self.lock:
             return self._session_stack.get(session_id)
+        
+    async def close_session_by_token(self, token: str) -> bool:
+        """
+        Mark a session as closed by its token. The session will be removed
+        by the background maintenance task.
+        
+        Args:
+            token: JWT session token
+            
+        Returns:
+            bool: True if session was marked closed, False otherwise
+        """
+        session_id = await self.validate_session(token)
+        if not session_id:
+            return False
+        async with self.lock:
+            session = self._session_stack.get(session_id)
+            if session and session.status != SessionStatus.CLOSED:
+                # Remove from idle queue if present
+                if session in self.idle_sessions:
+                    self.idle_sessions.remove(session)
+                session.status = SessionStatus.CLOSED
+                session.expires_at = time.time()
+                return True
+        return False
     
     async def clear(self):
         """
@@ -324,7 +337,7 @@ class SessionsCollection:
             except asyncio.CancelledError:
                 pass            
     
-    async def _wait_for_session(self, priority: int) -> 'Session':
+    async def _wait_for_session(self, priority: int) -> Session:
         """
         Wait for an available session with given priority.
         
@@ -374,6 +387,8 @@ class SessionsCollection:
         """
         while True:
             await asyncio.sleep(60) 
+            logger.debug("Maintenance loop running")
+            await self._cleanup_closed_sessions()
             await self._cleanup_idle_sessions()
             await self._recreate_error_sessions()
     
@@ -388,9 +403,32 @@ class SessionsCollection:
                 if current_time > session.expires_at:
                     to_remove.append(session)
                     self.idle_sessions.remove(session)
-            
-            for session in to_remove:
-                await self._close_session(session.id)
+            if to_remove:
+                logger.info(
+                    "Removing %d expired sessions: %s",
+                    len(to_remove),
+                    to_remove,
+                )
+        for session in to_remove:
+            await self._close_session(session.id)
+    
+    async def _cleanup_closed_sessions(self):
+        """
+        Remove closed sessions.
+        """
+        async with self.lock:
+            to_remove = []
+            for session_id, session in list(self._session_stack.items()):
+                if session.status == SessionStatus.CLOSED:
+                    to_remove.append(session)
+            if to_remove:
+                logger.info(
+                    "Removing %d closed sessions: %s",
+                    len(to_remove),
+                    to_remove,
+                )
+        for session in to_remove:
+            await self._close_session(session.id)
     
     async def _recreate_error_sessions(self):
         """
@@ -420,10 +458,7 @@ class SessionsCollection:
                         if controller_params:
                             # Get the controller class
                             controller_class = controllers[session.controller.__class__.__name__]
-                            if controller_class:
-                                # Create new controller instance
-                                new_controller = controller_class(**controller_params)
-                                
+                            if controller_class:                               
                                 # Create new session request
                                 request = SessionInitRequest(
                                     controller=session.controller.__class__.__name__,
@@ -432,24 +467,36 @@ class SessionsCollection:
                                 
                                 # Add new session
                                 await self.add(request)
-                                print(f"Successfully recreated session for {session.username}")
+                                logger.info(
+                                    "Successfully recreated session %s (identity=%s)",
+                                    session_id,
+                                    session.identity or "<none>",
+                                )
                     except Exception as e:
-                        print(f"Failed to recreate session {session_id}: {e}")
+                        logger.error(
+                            "Failed to recreate session %s: %s",
+                            session_id,
+                            e,
+                        )
                         # Session is already removed by _close_session
     
     async def _close_session(self, session_id: str):
-        """
-        Close and remove a session.
-        
-        Args:
-            session_id: ID of the session to close
-        """
+        logger.debug(f"_close_session called for {session_id}, stack keys: {list(self._session_stack.keys())}")
         if session_id in self._session_stack:
             try:
-                await self._session_stack[session_id].controller.disconnect()
-            except:
-                pass
-            del self._session_stack[session_id]
+                self._session_stack[session_id].controller.disconnect()
+            except Exception as e:
+                logger.error(f"Disconnect error: {e}")
+            try:
+                del self._session_stack[session_id]
+                logger.debug(
+                    "Successfully removed expired session: %s",
+                    session_id,
+                )
+            except Exception as e:
+                logger.error(f"Failed to delete {session_id}: {e}")
+        else:
+            logger.warning(f"Session {session_id} not found in stack")
 
 
 # Singleton instance for global use
